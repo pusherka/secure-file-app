@@ -1,0 +1,7 @@
+#!/bin/bash
+# Получаем абсолютный путь к директории, где лежит этот скрипт
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+
+# Активируем виртуальное окружение и запускаем приложение
+source "$SCRIPT_DIR/venv/bin/activate"
+python "$SCRIPT_DIR/main.py"
