@@ -1,10 +1,10 @@
 import os
 import base64
+import shutil
 from hashlib import pbkdf2_hmac
-from cryptography.fernet import Fernet
-from cryptography.fernet import InvalidToken
-ITERATIONS = 100_000
+from cryptography.fernet import Fernet, InvalidToken
 
+ITERATIONS = 100_000
 
 # ===== КЛЮЧ ИЗ ПАРОЛЯ =====
 def generate_key(password: str, salt: bytes):
@@ -17,7 +17,7 @@ def generate_key(password: str, salt: bytes):
     return base64.urlsafe_b64encode(key)
 
 
-# ===== ШИФРОВАНИЕ С УДАЛЕНИЕМ ОРИГИНАЛА =====
+# ===== ШИФРОВАНИЕ ФАЙЛА (С УДАЛЕНИЕМ ОРИГИНАЛА) =====
 def encrypt_file(filepath, password):
     salt = os.urandom(16)
     key = generate_key(password, salt)
@@ -27,22 +27,21 @@ def encrypt_file(filepath, password):
         data = f.read()
 
     encrypted = cipher.encrypt(data)
-
     enc_path = filepath + ".enc"
 
     with open(enc_path, 'wb') as f:
         f.write(salt + encrypted)
 
-    # 🔥 УДАЛЕНИЕ ОРИГИНАЛЬНОГО ФАЙЛА
+    # Удаление оригинального файла после шифрования
     try:
         os.remove(filepath)
     except Exception as e:
-        print("Не удалось удалить файл:", e)
+        print(f"Не удалось удалить оригинальный файл {filepath}: {e}")
 
     return enc_path
 
 
-# ===== РАСШИФРОВКА ФАЙЛА =====
+# ===== РАСШИФРОВКА ФАЙЛА (С УДАЛЕНИЕМ ИСХОДНОГО .enc) =====
 def decrypt_file(filepath, password):
     try:
         with open(filepath, 'rb') as f:
@@ -56,20 +55,56 @@ def decrypt_file(filepath, password):
 
         decrypted = cipher.decrypt(encrypted)
 
+        # Убираем расширение .enc
         output = filepath.replace('.enc', '')
 
         with open(output, 'wb') as f:
             f.write(decrypted)
 
+        # 🔥 ИСПРАВЛЕНИЕ: Удаляем зашифрованный (.enc) файл после успешного восстановления оригинала
+        try:
+            os.remove(filepath)
+        except Exception as e:
+            print(f"Не удалось удалить зашифрованный файл {filepath}: {e}")
+
     except InvalidToken:
         raise Exception("Неверный пароль или повреждённый файл")
 
-# ===== ПАПКА (пока просто сбор файлов) =====
-def get_all_files(folder):
-    files = []
 
-    for root, _, filenames in os.walk(folder):
-        for f in filenames:
-            files.append(os.path.join(root, f))
+# ===== ШИФРОВАНИЕ ПАПКИ (АРХИВАЦИЯ + ШИФРОВАНИЕ) =====
+def encrypt_folder(folderpath, password):
+    if not os.path.exists(folderpath):
+        raise Exception("Папка не найдена")
 
-    return files
+    # Создаем временный zip-архив из папки
+    archive_path = shutil.make_archive(folderpath, 'zip', folderpath)
+    
+    # Шифруем получившийся zip-архив. Появится файл папка.zip.enc
+    encrypt_file(archive_path, password)
+
+    # 🔥 Удаляем исходную папку со всем содержимым
+    try:
+        shutil.rmtree(folderpath)
+    except Exception as e:
+        print(f"Не удалось удалить исходную папку: {e}")
+
+
+# ===== РАСШИФРОВКА ПАПКИ (РАСШИФРОВКА АРХИВА + РАСПАКОВКА) =====
+def decrypt_folder(filepath, password):
+    if not filepath.endswith('.zip.enc'):
+        raise Exception("Для папок выберите файл с расширением .zip.enc")
+
+    # Расшифровываем .zip.enc -> получаем .zip файл обратно
+    decrypt_file(filepath, password)
+    zip_path = filepath.replace('.enc', '')
+
+    # Целевая папка для распаковки (имя без .zip)
+    output_folder = zip_path.replace('.zip', '')
+
+    # Распаковываем архив обратно в папку
+    try:
+        shutil.unpack_archive(zip_path, output_folder, 'zip')
+        # Удаляем временный расшифрованный zip-архив
+        os.remove(zip_path)
+    except Exception as e:
+        raise Exception(f"Ошибка при распаковке архива: {e}")
